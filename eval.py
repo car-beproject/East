@@ -5,16 +5,18 @@ import os
 import argparse
 import numpy as np
 import tensorflow as tf
+import matplotlib.pyplot as plt
 from keras.models import load_model, model_from_json
-
+from Utils import *
+import pytesseract
 import locality_aware_nms as nms_locality
 import lanms
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--test_data_path', type=str, default='../data/ICDAR2015/test_data')
+parser.add_argument('--test_data_path', type=str, default='Test/')
 parser.add_argument('--gpu_list', type=str, default='0')
-parser.add_argument('--model_path', type=str, default='')
-parser.add_argument('--output_dir', type=str, default='tmp/eval/east_icdar2015_resnet_v1_50_rbox/')
+parser.add_argument('--model_path', type=str, default='EAST_IC15+13_model.h5')
+parser.add_argument('--output_dir', type=str, default='tmp/')
 FLAGS = parser.parse_args()
 
 from model import *
@@ -129,10 +131,12 @@ def main(argv=None):
     try:
         os.makedirs(FLAGS.output_dir)
     except OSError as e:
+        print(e)
         if e.errno != 17:
             raise
 
     # load trained model
+    print("loading model")
     json_file = open(os.path.join('/'.join(FLAGS.model_path.split('/')[0:-1]), 'model.json'), 'r')
     loaded_model_json = json_file.read()
     json_file.close()
@@ -140,6 +144,7 @@ def main(argv=None):
     model.load_weights(FLAGS.model_path)
 
     img_list = get_images()
+    print("running on images")
     for img_file in img_list:
         img = cv2.imread(img_file)[:, :, ::-1]
         start_time = time.time()
@@ -158,7 +163,6 @@ def main(argv=None):
         boxes, timer = detect(score_map=score_map, geo_map=geo_map, timer=timer)
         print('{} : net {:.0f}ms, restore {:.0f}ms, nms {:.0f}ms'.format(
             img_file, timer['net']*1000, timer['restore']*1000, timer['nms']*1000))
-
         if boxes is not None:
             boxes = boxes[:, :8].reshape((-1, 4, 2))
             boxes[:, :, 0] /= ratio_w
@@ -169,24 +173,59 @@ def main(argv=None):
 
         # save to file
         if boxes is not None:
-            res_file = os.path.join(
-                FLAGS.output_dir,
-                '{}.txt'.format(
-                    os.path.basename(img_file).split('.')[0]))
-
-            with open(res_file, 'w') as f:
+##            print("saving to file")
+##            res_file = os.path.join(
+##                FLAGS.output_dir,
+##                '{}.txt'.format(
+##                    os.path.basename(img_file).split('.')[0]))
+##            print(res_file)
+##            with open(res_file, 'w') as f:
                 for box in boxes:
                     # to avoid submitting errors
                     box = sort_poly(box.astype(np.int32))
+                    
                     if np.linalg.norm(box[0] - box[1]) < 5 or np.linalg.norm(box[3]-box[0]) < 5:
                         continue
-                    f.write('{},{},{},{},{},{},{},{}\r\n'.format(
-                        box[0, 0], box[0, 1], box[1, 0], box[1, 1], box[2, 0], box[2, 1], box[3, 0], box[3, 1],
-                    ))
-                    cv2.polylines(img[:, :, ::-1], [box.astype(np.int32).reshape((-1, 1, 2))], True, color=(255, 255, 0), thickness=1)
-
-        img_path = os.path.join(FLAGS.output_dir, os.path.basename(img_file))
-        cv2.imwrite(img_path, img[:, :, ::-1])
+                    x=[box[0,0],box[1,0],box[2,0],box[3,0]]
+                    y=[box[0,1],box[2,1],box[1,1],box[3,1]]
+##                    print(min(x))
+##                    print(min(y))
+##                    print(max(x))
+##                    print(max(y))
+                    crop_img=img[min(y)-5:max(y)+5,min(x)-5:max(x)+5]
+                    try:
+                        plt.imshow(crop_img)
+                        plt.show()
+                        imgp = clean_image(crop_img)
+                        plt.imshow(imgp)
+                        plt.show()
+                        #plt.imshow(crop_img)
+                        #plt.show()
+                        #text=pytesseract.image_to_string(img, config="-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVXYZ")
+                        #print("Licence plate: "+text)
+                        clean_img, chars = extract_characters(imgp)
+                        plt.imshow(clean_img)
+                        plt.show()
+                        #text=pytesseract.image_to_string(clean_img, config="-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVXYZ")
+                        #print("Licence plate: "+text)
+                        #output_img = highlight_characters(clean_img, chars)
+                        output_img = highlight_characters(clean_img, chars)
+                        plt.imshow(output_img)
+                        plt.show()
+                        #cv2.imwrite('licence_plate_out.png', output_img)
+                        #plt.imshow(output_img)
+                        text=pytesseract.image_to_string(output_img, config="-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVXYZ")
+                        print("Licence plate: "+text)
+                    except:
+                        text=pytesseract.image_to_string(crop_img, config="-c tessedit_char_whitelist=0123456789ABCDEFGHIJKLMNOPQRSTUVXYZ")
+                        print(text)
+                    op_image=cv2.polylines(img[:, :, ::-1], [box.astype(np.int32).reshape((-1, 1, 2))], True, color=(255, 255, 0), thickness=1)
+##                    print("coordinates")
+##                    print(box[0,0])
+##                    print(box[3,1])
+        #img_path = os.path.join(FLAGS.output_dir, os.path.basename(img_file))
+                        
+        #cv2.imwrite(img_path, img[:, :, ::-1])
 
 
 if __name__ == '__main__':
